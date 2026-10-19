@@ -1,5 +1,5 @@
 import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
-import { successEmbed } from '../../utils/embeds.js';
+import { createEmbed } from '../../utils/embeds.js';
 import { logger } from '../../utils/logger.js';
 import { TitanBotError, ErrorTypes } from '../../utils/errorHandler.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
@@ -99,13 +99,20 @@ export default {
             durationChoices.find((c) => c.value === durationMinutes)
                 ?.name || `${durationMinutes} minutes`;
 
-        await InteractionHelper.safeEditReply(interaction, {
-            embeds: [
-                successEmbed(
-                    `⏳ **Timed out** ${targetUser.tag} for ${durationDisplay}.`,
-                    `**Reason:** ${reason}\n**Case ID:** #${result.caseId}`,
-                ),
+        const embed = createEmbed({
+            title: 'Muted',
+            description: `${targetUser} muted`,
+            color: 'success',
+            fields: [
+                { name: 'Reason', value: reason },
+                { name: 'Duration', value: durationDisplay },
             ],
+            timestamp: true,
+            footer: result?.caseId ? `Case ID: #${result.caseId}` : undefined,
+        });
+
+        await InteractionHelper.safeEditReply(interaction, {
+            embeds: [embed],
         });
     },
 };
