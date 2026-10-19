@@ -292,10 +292,38 @@ module.exports = [
       }
       const channel = message.mentions.channels.first() || message.guild.channels.cache.get(args[0]);
       if (!channel) return safeReply(message, 'Mention a channel or provide a channel ID.');
-      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null };
+
+      const subArg = (args[1] || '').toLowerCase();
+      const useEmbed = subArg === 'embed' || subArg === 'true';
+
+      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null, welcomeEmbed: false };
       config.welcomeChannelId = channel.id;
+      config.welcomeEmbed = useEmbed;
       guildConfigs.set(message.guild.id, config);
-      safeReply(message, `Welcome channel set to **${channel.name}**.`);
+
+      safeReply(message, `Welcome channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`);
+    }
+  },
+
+  {
+    name: 'levelup',
+    description: 'Set the level up message channel',
+    async execute({ message, guildConfigs, args }) {
+      if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+        return safeReply(message, 'You need the Manage Server permission.');
+      }
+      const channel = message.mentions.channels.first() || message.guild.channels.cache.get(args[0]);
+      if (!channel) return safeReply(message, 'Mention a channel or provide a channel ID.');
+
+      const subArg = (args[1] || '').toLowerCase();
+      const useEmbed = subArg === 'embed' || subArg === 'true';
+
+      const config = guildConfigs.get(message.guild.id) || { levelUpChannelId: null, levelUpEmbed: false };
+      config.levelUpChannelId = channel.id;
+      config.levelUpEmbed = useEmbed;
+      guildConfigs.set(message.guild.id, config);
+
+      safeReply(message, `Level up channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`);
     }
   },
 
