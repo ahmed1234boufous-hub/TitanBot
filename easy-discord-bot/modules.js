@@ -1,9 +1,40 @@
-const { EmbedBuilder, PermissionsBitField } = require('discord.js');
+const { EmbedBuilder, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 
 const warnStore = new Map();
 
 function safeReply(message, text) {
   return message.reply({ content: text }).catch(() => {});
+}
+
+function getModerationTemplate(config, key, fallbackText) {
+  const base = config?.moderationTemplates?.[key] || { useEmbed: false, content: fallbackText };
+  return {
+    useEmbed: Boolean(base.useEmbed),
+    content: base.content || fallbackText
+  };
+}
+
+function fillTemplate(template, values) {
+  return template.replace(/\{\s*([a-zA-Z0-9_]+)\s*\}/g, (_, key) => {
+    const value = values[key];
+    return typeof value === 'undefined' || value === null ? '' : String(value);
+  });
+}
+
+function sendModerationMessage(message, config, key, fallbackText, values, title) {
+  const template = getModerationTemplate(config, key, fallbackText);
+  const output = fillTemplate(template.content, values);
+
+  if (template.useEmbed) {
+    const embed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setTitle(title)
+      .setDescription(output)
+      .setTimestamp();
+    return message.reply({ embeds: [embed] }).catch(() => {});
+  }
+
+  return safeReply(message, output);
 }
 
 module.exports = [
@@ -60,7 +91,7 @@ module.exports = [
       const embed = new EmbedBuilder()
         .setColor('#feca57')
         .setTitle(user.tag)
-        .setThumbnail(user.displayAvatarURL({ dynamic: true }))
+        .setThumbnail(user.displayAvatarURL({ format: 'png', size: 4096, dynamic: true }))
         .addFields(
           { name: 'ID', value: user.id, inline: true },
           { name: 'Bot', value: user.bot ? 'Yes' : 'No', inline: true },
@@ -130,84 +161,147 @@ module.exports = [
   {
     name: 'kick',
     description: 'Kick a member',
-    async execute({ message, args }) {
+    async execute({ message, args, guildConfigs }) {
       if (!message.member.permissions.has(PermissionsBitField.Flags.KickMembers)) {
         return safeReply(message, 'You need the Kick Members permission.');
       }
       const target = message.mentions.members.first() || message.guild.members.cache.get(args[0]);
       if (!target) return safeReply(message, 'Mention a member or provide a user ID.');
-      if (!target.kickable) return safeReply(message, 'I cannot kick that member.');
       const reason = args.slice(1).join(' ') || 'No reason provided';
+      const config = guildConfigs.get(message.guild.id) || { moderationTemplates: {} };
+      if (!target.kickable) return safeReply(message, 'I cannot kick that member.');
       await target.kick(reason);
-      safeReply(message, `Kicked **${target.user.tag}** for: ${reason}`);
+      sendModerationMessage(
+        message,
+        config,
+        'kick',
+        'Kicked {userTag}. Reason: {reason}',
+        { userTag: target.user.tag, reason },
+        'Member kicked'
+      );
     }
   },
 
   {
     name: 'ban',
     description: 'Ban a member',
-    async execute({ message, args }) {
+    async execute({ message, args, guildConfigs }) {
       if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
         return safeReply(message, 'You need the Ban Members permission.');
       }
       const target = message.mentions.members.first() || message.guild.members.cache.get(args[0]);
       const reason = args.slice(1).join(' ') || 'No reason provided';
+      const config = guildConfigs.get(message.guild.id) || { moderationTemplates: {} };
       if (target) {
         if (!target.bannable) return safeReply(message, 'I cannot ban that member.');
         await target.ban({ reason });
-        return safeReply(message, `Banned **${target.user.tag}** for: ${reason}`);
+        return sendModerationMessage(
+          message,
+          config,
+          'ban',
+          'Banned {userTag}. Reason: {reason}',
+          { userTag: target.user.tag, reason },
+          'Member banned'
+        );
       }
       if (!args[0]) return safeReply(message, 'Usage: ban <userId|@member> [reason]');
       await message.guild.bans.create(args[0], { reason }).catch(() => null);
-      safeReply(message, `Banned user ID **${args[0]}** for: ${reason}`);
+      return sendModerationMessage(
+        message,
+        config,
+        'ban',
+        'Banned user ID {user}. Reason: {reason}',
+        { user: args[0], reason },
+        'Member banned'
+      );
     }
   },
 
   {
     name: 'unban',
     description: 'Unban a user',
-    async execute({ message, args }) {
+    async execute({ message, args, guildConfigs }) {
       if (!message.member.permissions.has(PermissionsBitField.Flags.BanMembers)) {
         return safeReply(message, 'You need the Ban Members permission.');
       }
       const userId = args[0];
+      const config = guildConfigs.get(message.guild.id) || { moderationTemplates: {} };
       if (!userId) return safeReply(message, 'Usage: unban <userId>');
       await message.guild.bans.remove(userId).catch(() => null);
-      safeReply(message, `Unbanned user ID **${userId}**.`);
+      return sendModerationMessage(
+        message,
+        config,
+        'unban',
+        'Unbanned user ID {user}.',
+        { user: userId },
+        'Member unbanned'
+      );
     }
   },
 
   {
     name: 'mute',
-    description: 'Mute a member',
-    async execute({ message, args }) {
+    description: 'Timeout a member',
+    async execute({ message, args, guildConfigs }) {
       if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
         return safeReply(message, 'You need the Moderate Members permission.');
       }
       const target = message.mentions.members.first() || message.guild.members.cache.get(args[0]);
+      const config = guildConfigs.get(message.guild.id) || { moderationTemplates: {} };
       if (!target) return safeReply(message, 'Mention a member or provide a user ID.');
       const duration = Number(args[1] || 0);
       const ms = duration > 0 ? duration * 60000 : 0;
+      const reason = args.slice(2).join(' ') || 'No reason provided';
       if (ms > 0) {
         await target.timeout(ms, 'Muted by command');
-        return safeReply(message, `Muted **${target.user.tag}** for **${duration}** minutes.`);
+        return sendModerationMessage(
+          message,
+          config,
+          'timeout',
+          'Timed out {userTag} for {duration} minutes. Reason: {reason}',
+          { userTag: target.user.tag, duration, reason },
+          'Timeout applied'
+        );
       }
-      await target.timeout(null, 'Muted by command');
-      safeReply(message, `Muted **${target.user.tag}**.`);
+      await target.timeout(null, 'Timeout removed by command');
+      return sendModerationMessage(
+        message,
+        config,
+        'unmute',
+        'Unmuted {userTag}.',
+        { userTag: target.user.tag },
+        'Timeout removed'
+      );
+    }
+  },
+
+  {
+    name: 'timeout',
+    description: 'Timeout a member',
+    async execute({ message, args, guildConfigs }) {
+      return module.exports.find((cmd) => cmd.name === 'mute').execute({ message, args, guildConfigs });
     }
   },
 
   {
     name: 'unmute',
     description: 'Remove timeout from a member',
-    async execute({ message, args }) {
+    async execute({ message, args, guildConfigs }) {
       if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
         return safeReply(message, 'You need the Moderate Members permission.');
       }
       const target = message.mentions.members.first() || message.guild.members.cache.get(args[0]);
+      const config = guildConfigs.get(message.guild.id) || { moderationTemplates: {} };
       if (!target) return safeReply(message, 'Mention a member or provide a user ID.');
       await target.timeout(null, 'Timeout removed by command');
-      safeReply(message, `Unmuted **${target.user.tag}**.`);
+      return sendModerationMessage(
+        message,
+        config,
+        'unmute',
+        'Unmuted {userTag}.',
+        { userTag: target.user.tag },
+        'Timeout removed'
+      );
     }
   },
 
@@ -254,17 +348,25 @@ module.exports = [
   {
     name: 'warn',
     description: 'Warn a member',
-    async execute({ message, args, warns }) {
+    async execute({ message, args, warns, guildConfigs }) {
       if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers)) {
         return safeReply(message, 'You need the Moderate Members permission.');
       }
       const target = message.mentions.members.first() || message.guild.members.cache.get(args[0]);
+      const config = guildConfigs.get(message.guild.id) || { moderationTemplates: {} };
       if (!target) return safeReply(message, 'Mention a member or provide a user ID.');
       const reason = args.slice(1).join(' ') || 'No reason provided';
       const key = `${message.guild.id}:${target.id}`;
       const count = warns.get(key) || 0;
       warns.set(key, count + 1);
-      safeReply(message, `Warned **${target.user.tag}** (${count + 1} warning${count + 1 > 1 ? 's' : ''}) for: ${reason}`);
+      return sendModerationMessage(
+        message,
+        config,
+        'warn',
+        'Warned {userTag}. Reason: {reason}',
+        { userTag: target.user.tag, reason },
+        'Warning issued'
+      );
     }
   },
 
@@ -296,12 +398,22 @@ module.exports = [
       const subArg = (args[1] || '').toLowerCase();
       const useEmbed = subArg === 'embed' || subArg === 'true';
 
-      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null, welcomeEmbed: false };
+      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null, welcomeEmbed: false, levelUpChannelId: null, levelUpEmbed: false, moderationTemplates: {} };
       config.welcomeChannelId = channel.id;
       config.welcomeEmbed = useEmbed;
       guildConfigs.set(message.guild.id, config);
 
-      safeReply(message, `Welcome channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`);
+      const buttonRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`toggle_welcome:${message.guild.id}`)
+          .setLabel(config.welcomeEmbed ? 'Disable embed' : 'Enable embed')
+          .setStyle(config.welcomeEmbed ? ButtonStyle.Secondary : ButtonStyle.Success)
+      );
+
+      return message.reply({
+        content: `Welcome channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`,
+        components: [buttonRow]
+      }).catch(() => {});
     }
   },
 
@@ -318,12 +430,78 @@ module.exports = [
       const subArg = (args[1] || '').toLowerCase();
       const useEmbed = subArg === 'embed' || subArg === 'true';
 
-      const config = guildConfigs.get(message.guild.id) || { levelUpChannelId: null, levelUpEmbed: false };
+      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null, welcomeEmbed: false, levelUpChannelId: null, levelUpEmbed: false, moderationTemplates: {} };
       config.levelUpChannelId = channel.id;
       config.levelUpEmbed = useEmbed;
       guildConfigs.set(message.guild.id, config);
 
-      safeReply(message, `Level up channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`);
+      const buttonRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`toggle_levelup:${message.guild.id}`)
+          .setLabel(config.levelUpEmbed ? 'Disable embed' : 'Enable embed')
+          .setStyle(config.levelUpEmbed ? ButtonStyle.Secondary : ButtonStyle.Success)
+      );
+
+      return message.reply({
+        content: `Level up channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`,
+        components: [buttonRow]
+      }).catch(() => {});
+    }
+  },
+
+  {
+    name: 'leveling',
+    description: 'Alias for the level up setup command',
+    async execute({ message, guildConfigs, args }) {
+      return module.exports.find((cmd) => cmd.name === 'levelup').execute({ message, guildConfigs, args });
+    }
+  },
+
+  {
+    name: 'moderation-dashboard',
+    description: 'Open the moderation dashboard for editing templates',
+    async execute({ message, guildConfigs }) {
+      if (!message.member.permissions.has(PermissionsBitField.Flags.ModerateMembers) && !message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+        return safeReply(message, 'You need a moderation or server management permission.');
+      }
+
+      const config = guildConfigs.get(message.guild.id) || { moderationTemplates: {} };
+      const actions = [
+        ['warn', 'Warn'],
+        ['timeout', 'Timeout'],
+        ['unmute', 'Unmute'],
+        ['kick', 'Kick'],
+        ['ban', 'Ban'],
+        ['unban', 'Unban']
+      ];
+
+      const rows = [];
+      for (let i = 0; i < actions.length; i += 3) {
+        rows.push(
+          new ActionRowBuilder().addComponents(
+            ...actions.slice(i, i + 3).map(([key, label]) =>
+              new ButtonBuilder()
+                .setCustomId(`mod_edit:${key}`)
+                .setLabel(label)
+                .setStyle(ButtonStyle.Primary)
+            )
+          )
+        );
+      }
+
+      const dashboard = new EmbedBuilder()
+        .setColor('#5865F2')
+        .setTitle('Moderation dashboard')
+        .setDescription('Select a moderation action to edit its response template and embed behavior.')
+        .addFields(
+          actions.map(([key, label]) => ({
+            name: label,
+            value: getModerationTemplate(config, key, 'Template not set').useEmbed ? 'Embed enabled' : 'Plain text',
+            inline: true
+          }))
+        );
+
+      return message.reply({ embeds: [dashboard], components: rows }).catch(() => {});
     }
   },
 
@@ -464,3 +642,5 @@ module.exports = [
     }
   }
 ];
+
+
