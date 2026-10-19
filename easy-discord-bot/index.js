@@ -1,68 +1,69 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Partials, Collection } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const commands = require('./modules');
 
 const PREFIX = process.env.PREFIX || '!';
 const TOKEN = process.env.DISCORD_TOKEN;
+
 if (!TOKEN) {
-  console.error('Missing DISCORD_TOKEN in environment');
+  console.error('Missing DISCORD_TOKEN in environment.');
   process.exit(1);
 }
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMessageReactions
   ],
   partials: [Partials.Channel]
 });
 
 client.commands = new Collection();
+for (const command of commands) {
+  client.commands.set(command.name, command);
+}
 
-// Load commands from modules.js
-const modules = require('./modules');
-for (const cmd of modules.commands) {
-  client.commands.set(cmd.name, cmd);
+const guildConfigs = new Map();
+const warns = new Map();
+
+function getGuildConfig(guildId) {
+  if (!guildConfigs.has(guildId)) guildConfigs.set(guildId, { welcomeChannelId: null });
+  return guildConfigs.get(guildId);
 }
 
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
+  client.user.setPresence({ activities: [{ name: `${PREFIX}help | easy bot`, type: 0 }], status: 'online' });
+});
+
+client.on('guildMemberAdd', async (member) => {
+  const config = getGuildConfig(member.guild.id);
+  if (!config.welcomeChannelId) return;
+  const channel = member.guild.channels.cache.get(config.welcomeChannelId);
+  if (!channel || !channel.isTextBased()) return;
+  const msg = `Welcome ${member.user} to **${member.guild.name}**!\nYou are member #${member.guild.memberCount}.`;
+  channel.send({ content: msg }).catch(() => {});
 });
 
 client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-  if (!message.guild) return; // ignore DMs
+  if (message.author.bot || !message.guild) return;
+  if (!message.content.startsWith(PREFIX)) return;
 
-  const prefix = PREFIX;
-  if (!message.content.startsWith(prefix)) return;
-
-  const args = message.content.slice(prefix.length).trim().split(/\s+/);
-  const commandName = args.shift().toLowerCase();
+  const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
+  const commandName = args.shift()?.toLowerCase();
+  if (!commandName) return;
 
   const command = client.commands.get(commandName);
   if (!command) return;
 
   try {
-    await command.execute({ client, message, args });
-  } catch (err) {
-    console.error('Command error', err);
-    message.reply('There was an error while executing that command.');
-  }
-});
-
-// Simple welcome
-client.on('guildMemberAdd', async (member) => {
-  try {
-    const channelId = process.env.WELCOME_CHANNEL_ID;
-    if (channelId) {
-      const ch = member.guild.channels.cache.get(channelId);
-      if (ch && ch.isTextBased()) ch.send({ content: `Welcome <@${member.id}> to **${member.guild.name}**!` });
-    }
-  } catch (e) {
-    console.warn('Welcome handler error', e);
+    await command.execute({ client, message, args, guildConfigs, warns, prefix: PREFIX });
+  } catch (error) {
+    console.error('Command error:', error);
+    message.reply({ content: 'There was an error while running that command.' }).catch(() => {});
   }
 });
 
