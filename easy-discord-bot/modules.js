@@ -6,6 +6,15 @@ function safeReply(message, text) {
   return message.reply({ content: text }).catch(() => {});
 }
 
+function getCustomMessage(guildConfigs, guildId, cmdName, defaultText, variables = {}) {
+  const config = guildConfigs?.get(guildId);
+  let text = config?.customMessages?.[cmdName] || defaultText;
+  for (const [key, val] of Object.entries(variables)) {
+    text = text.replace(new RegExp(`\{${key}\}`, 'g'), val);
+  }
+  return text;
+}
+
 module.exports = [
   {
     name: 'help',
@@ -139,7 +148,11 @@ module.exports = [
       if (!target.kickable) return safeReply(message, 'I cannot kick that member.');
       const reason = args.slice(1).join(' ') || 'No reason provided';
       await target.kick(reason);
-      safeReply(message, `Kicked **${target.user.tag}** for: ${reason}`);
+      const text = getCustomMessage(guildConfigs, message.guild.id, 'kick', `Kicked **{user}** for: {reason}`, {
+        user: target.user.tag,
+        reason: reason
+      });
+      safeReply(message, text);
     }
   },
 
@@ -155,11 +168,19 @@ module.exports = [
       if (target) {
         if (!target.bannable) return safeReply(message, 'I cannot ban that member.');
         await target.ban({ reason });
-        return safeReply(message, `Banned **${target.user.tag}** for: ${reason}`);
+        const text = getCustomMessage(guildConfigs, message.guild.id, 'ban', `Banned **{user}** for: {reason}`, {
+          user: target.user.tag,
+          reason: reason
+        });
+        return safeReply(message, text);
       }
       if (!args[0]) return safeReply(message, 'Usage: ban <userId|@member> [reason]');
       await message.guild.bans.create(args[0], { reason }).catch(() => null);
-      safeReply(message, `Banned user ID **${args[0]}** for: ${reason}`);
+      const text = getCustomMessage(guildConfigs, message.guild.id, 'ban', `Banned user ID **{userId}** for: {reason}`, {
+        userId: args[0],
+        reason: reason
+      });
+      safeReply(message, text);
     }
   },
 
@@ -190,10 +211,17 @@ module.exports = [
       const ms = duration > 0 ? duration * 60000 : 0;
       if (ms > 0) {
         await target.timeout(ms, 'Muted by command');
-        return safeReply(message, `Muted **${target.user.tag}** for **${duration}** minutes.`);
+        const text = getCustomMessage(guildConfigs, message.guild.id, 'mute', `Muted **{user}** for **{duration}** minutes.`, {
+          user: target.user.tag,
+          duration: duration
+        });
+        return safeReply(message, text);
       }
       await target.timeout(null, 'Muted by command');
-      safeReply(message, `Muted **${target.user.tag}**.`);
+      const text = getCustomMessage(guildConfigs, message.guild.id, 'mute', `Muted **{user}**.`, {
+        user: target.user.tag
+      });
+      safeReply(message, text);
     }
   },
 
@@ -264,7 +292,13 @@ module.exports = [
       const key = `${message.guild.id}:${target.id}`;
       const count = warns.get(key) || 0;
       warns.set(key, count + 1);
-      safeReply(message, `Warned **${target.user.tag}** (${count + 1} warning${count + 1 > 1 ? 's' : ''}) for: ${reason}`);
+      const text = getCustomMessage(guildConfigs, message.guild.id, 'warn', `Warned **{user}** ({count} warning{plural}) for: {reason}`, {
+        user: target.user.tag,
+        count: count + 1,
+        plural: count + 1 > 1 ? 's' : '',
+        reason: reason
+      });
+      safeReply(message, text);
     }
   },
 
@@ -292,10 +326,32 @@ module.exports = [
       }
       const channel = message.mentions.channels.first() || message.guild.channels.cache.get(args[0]);
       if (!channel) return safeReply(message, 'Mention a channel or provide a channel ID.');
-      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null };
+      const subArg = (args[1] || '').toLowerCase();
+      const useEmbed = subArg === 'embed' || subArg === 'true';
+      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null, welcomeEmbed: false };
       config.welcomeChannelId = channel.id;
+      config.welcomeEmbed = useEmbed;
       guildConfigs.set(message.guild.id, config);
-      safeReply(message, `Welcome channel set to **${channel.name}**.`);
+      safeReply(message, `Welcome channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`);
+    }
+  },
+
+  {
+    name: 'levelup',
+    description: 'Set the level up message channel',
+    async execute({ message, guildConfigs, args }) {
+      if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
+        return safeReply(message, 'You need the Manage Server permission.');
+      }
+      const channel = message.mentions.channels.first() || message.guild.channels.cache.get(args[0]);
+      if (!channel) return safeReply(message, 'Mention a channel or provide a channel ID.');
+      const subArg = (args[1] || '').toLowerCase();
+      const useEmbed = subArg === 'embed' || subArg === 'true';
+      const config = guildConfigs.get(message.guild.id) || { levelUpChannelId: null, levelUpEmbed: false };
+      config.levelUpChannelId = channel.id;
+      config.levelUpEmbed = useEmbed;
+      guildConfigs.set(message.guild.id, config);
+      safeReply(message, `Level up channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`);
     }
   },
 
