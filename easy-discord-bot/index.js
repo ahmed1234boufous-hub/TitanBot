@@ -34,9 +34,12 @@ function getGuildConfig(guildId) {
     guildConfigs.set(guildId, {
       welcomeChannelId: null,
       welcomeEmbed: false,
+      welcomeMessage: `Welcome to **{guildName}**!\nYou are member #{count}.`,
       welcomeImage: null,
       levelUpChannelId: null,
       levelUpEmbed: false,
+      levelUpMessage: '{user} has leveled up to level {level}!',
+      levelUpImage: null,
       moderationTemplates: {
         timeout: { useEmbed: false, content: 'Timed out {userTag} for {duration} minutes. Reason: {reason}' },
         warn: { useEmbed: false, content: 'Warned {userTag}. Reason: {reason}' },
@@ -60,7 +63,14 @@ client.on('guildMemberAdd', async (member) => {
   if (!config.welcomeChannelId) return;
   const channel = member.guild.channels.cache.get(config.welcomeChannelId);
   if (!channel || !channel.isTextBased()) return;
-  const msg = `Welcome ${member.user} to **${member.guild.name}**!\nYou are member #${member.guild.memberCount}.`;
+
+  const msg = (config.welcomeMessage || `Welcome ${member.user} to **${member.guild.name}**!\nYou are member #${member.guild.memberCount}.`)
+    .replace(/\{user\}/gi, member.user.tag)
+    .replace(/\{userName\}/gi, member.user.username)
+    .replace(/\{server\}/gi, member.guild.name)
+    .replace(/\{guild\}/gi, member.guild.name)
+    .replace(/\{count\}/gi, member.guild.memberCount)
+    .replace(/\{guildName\}/gi, member.guild.name);
 
   if (config.welcomeEmbed) {
     const embed = new EmbedBuilder()
@@ -103,4 +113,3 @@ client.login(TOKEN).catch((err) => {
   console.error('Failed to login to Discord:', err);
   process.exit(1);
 });
-

@@ -398,6 +398,7 @@ module.exports = [
       const extraArgs = args.slice(1);
       let useEmbed = false;
       let welcomeImage = null;
+      let customMessage = '';
 
       for (let i = 0; i < extraArgs.length; i++) {
         const raw = extraArgs[i];
@@ -419,19 +420,29 @@ module.exports = [
 
         if (/^https?:\/\//i.test(raw)) {
           welcomeImage = raw;
+          continue;
         }
+
+        customMessage = extraArgs.slice(i).join(' ');
+        break;
       }
+
+      const finalMessage = customMessage || `Welcome ${message.author} to **${message.guild.name}**!\nYou are member #${message.guild.memberCount}.`;
 
       const config = guildConfigs.get(message.guild.id) || {
         welcomeChannelId: null,
         welcomeEmbed: false,
+        welcomeMessage: null,
         welcomeImage: null,
         levelUpChannelId: null,
         levelUpEmbed: false,
+        levelUpImage: null,
+        levelUpMessage: null,
         moderationTemplates: {}
       };
       config.welcomeChannelId = channel.id;
       config.welcomeEmbed = useEmbed;
+      config.welcomeMessage = finalMessage;
       config.welcomeImage = welcomeImage;
       guildConfigs.set(message.guild.id, config);
 
@@ -443,7 +454,7 @@ module.exports = [
       );
 
       return message.reply({
-        content: `Welcome channel set to **${channel.name}** (Embed mode: **${config.welcomeEmbed ? 'Enabled' : 'Disabled'}**${config.welcomeImage ? `, Image: ${config.welcomeImage}` : ''}).`,
+        content: `Welcome channel set to **${channel.name}** (Embed mode: **${config.welcomeEmbed ? 'Enabled' : 'Disabled'}**${config.welcomeImage ? `, Image: ${config.welcomeImage}` : ''}${config.welcomeMessage ? `, Message: ${config.welcomeMessage}` : ''}).`,
         components: [buttonRow]
       }).catch(() => {});
     }
@@ -459,12 +470,43 @@ module.exports = [
       const channel = message.mentions.channels.first() || message.guild.channels.cache.get(args[0]);
       if (!channel) return safeReply(message, 'Mention a channel or provide a channel ID.');
 
-      const subArg = (args[1] || '').toLowerCase();
-      const useEmbed = subArg === 'embed' || subArg === 'true';
+      const extraArgs = args.slice(1);
+      let useEmbed = false;
+      let levelUpImage = null;
+      let customMessage = '';
 
-      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null, welcomeEmbed: false, levelUpChannelId: null, levelUpEmbed: false, moderationTemplates: {} };
+      for (let i = 0; i < extraArgs.length; i++) {
+        const raw = extraArgs[i];
+        const value = raw.toLowerCase();
+
+        if (value === 'embed' || value === 'true') {
+          useEmbed = true;
+          continue;
+        }
+
+        if (value === 'image' || value === 'img') {
+          const nextArg = extraArgs[i + 1];
+          if (nextArg && /^https?:\/\//i.test(nextArg)) {
+            levelUpImage = nextArg;
+            i += 1;
+          }
+          continue;
+        }
+
+        if (/^https?:\/\//i.test(raw)) {
+          levelUpImage = raw;
+          continue;
+        }
+
+        customMessage = extraArgs.slice(i).join(' ');
+        break;
+      }
+
+      const config = guildConfigs.get(message.guild.id) || { welcomeChannelId: null, welcomeEmbed: false, welcomeMessage: null, welcomeImage: null, levelUpChannelId: null, levelUpEmbed: false, levelUpImage: null, levelUpMessage: null, moderationTemplates: {} };
       config.levelUpChannelId = channel.id;
       config.levelUpEmbed = useEmbed;
+      config.levelUpMessage = customMessage || '{user} has leveled up to level {level}!';
+      config.levelUpImage = levelUpImage;
       guildConfigs.set(message.guild.id, config);
 
       const buttonRow = new ActionRowBuilder().addComponents(
@@ -475,7 +517,7 @@ module.exports = [
       );
 
       return message.reply({
-        content: `Level up channel set to **${channel.name}** (Embed mode: **${useEmbed ? 'Enabled' : 'Disabled'}**).`,
+        content: `Level up channel set to **${channel.name}** (Embed mode: **${config.levelUpEmbed ? 'Enabled' : 'Disabled'}**${config.levelUpImage ? `, Image: ${config.levelUpImage}` : ''}${config.levelUpMessage ? `, Message: ${config.levelUpMessage}` : ''}).`,
         components: [buttonRow]
       }).catch(() => {});
     }
@@ -674,6 +716,16 @@ module.exports = [
     }
   }
 ];
+
+
+
+
+
+
+
+
+
+
 
 
 
